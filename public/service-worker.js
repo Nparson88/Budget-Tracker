@@ -1,64 +1,69 @@
 const FILES_TO_CACHE = [
     '/',
-    '/public/index.html',
-    '/public/index.js',
-    '/public/styles.css',
-    '/public/manifest.webmanifest',
-    '/public/icons/icon-192x192.png',
-    '/public/icons/icon-512x512.png',
+    '/index.html',
+    '/index.js',
+    '/style.css',
+    '/manifest.webmanifest',
+    '/icons/icon-192x192.png',
+    '/icons/icon-512x512.png',
     "https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css",
     "https://cdn.jsdelivr.net/npm/chart.js@2.8.0"
 ]
-const STATIC_CACHE = "static-cache-v2";
+const STATIC_CACHE = "static-cache-v1";
 const DATA_CACHE = "data-cache-v1";
 
-self.addEventListener('install', (event) => {
+self.addEventListener("install", function (event) {
     event.waitUntil(
-      caches
-        .open(STATIC_CACHE)
-        .then((cache) => cache.addAll(FILES_TO_CACHE))
-        .then(self.skipWaiting())
+        caches.open(STATIC_CACHE).then(cache => {
+            console.log("cache uploaded");
+            return cache.addAll(FILES_TO_CACHE);
+        })
     );
-  });
+    self.skipWaiting();
+});
 
-  self.addEventListener('activate', (event) => {
-    const currentCaches = [STATIC_CACHE, DATA_CACHE];
+self.addEventListener("activate", function (event) {
     event.waitUntil(
-      caches
-        .keys()
-        .then((cacheNames) => {
-          return cacheNames.filter(
-              (cacheName) => !currentCaches.includes(cacheName));
+        caches.keys().then(keyList => {
+            return Promise.all(
+                keyList.map(key => {
+                    if (key !== STATIC_CACHE && key !== DATA_CACHE) {
+                        console.log("Deleting old cache", key);
+                        return caches.delete(key);
+                    }
+                })
+            );
         })
-        .then((cachesToDelete) => {
-          return Promise.all(
-            cachesToDelete.map(
-                (cacheToDelete) => {
-              return caches.delete(cacheToDelete);
-            })
-          );
-        })
-        .then(() => self.clients.claim())
     );
-  });
-  
-  self.addEventListener('fetch', (event) => {
-    if (event.request.url.startsWith(self.location.origin)) {
-      event.respondWith(
-        caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-  
-          return caches.open(DATA_CACHE).then((cache) => {
-            return fetch(event.request).then((response) => {
-              return cache.put(event.request, response.clone()).then(() => {
-                return response;
-              });
-            });
-          });
-        })
-      );
+
+    self.clients.claim();
+});
+
+self.addEventListener("fetch", event => {
+    if (event.request.url.includes('/api/')) {
+        console.log('fetching data', event.request.url);
+
+        event.respondWith(
+            caches.open(DATA_CACHE).then(cache => {
+                return fetch(event.request)
+                    .then(response => {
+                        if (response.status === 200) {
+                            cache.put(event.request.url, response.clone());
+                        }
+                        return response;
+                    })
+                    .catch(err => {
+                        return cache.match(event.request);
+                    });
+            })
+        );
+        return;
     }
-  });
-  
+
+    event.respondWith(caches.open(STATIC_CACHE).then(cache => {
+        return cache.match(event.request).then(response => {
+            return response || fetch(event.request);
+        });
+    })
+    );
+});
